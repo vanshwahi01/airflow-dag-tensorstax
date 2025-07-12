@@ -1,0 +1,11 @@
+# Python venv  
+.env/  
+
+# Airflow metadata, logs, etc  
+airflow_home/  
+airflow_home/logs/  
+airflow_home/plugins/  
+
+# Python cache  
+__pycache__/  
+*.py[cod]  
