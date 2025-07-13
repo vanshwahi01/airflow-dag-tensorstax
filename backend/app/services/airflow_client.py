@@ -50,4 +50,12 @@ async def get_task_logs(
         resp.raise_for_status()
         return resp.text
 
-
+async def list_tasks(dag_id: str):
+    """
+    List all tasks in a DAG, including their upstream/downstream links.
+    """
+    url = f"{AIRFLOW_BASE}/dags/{dag_id}/tasks"
+    async with httpx.AsyncClient(auth=(AIRFLOW_USER, AIRFLOW_PASS)) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        return resp.json()["tasks"]
