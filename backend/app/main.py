@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.responses import PlainTextResponse
 from .services.airflow_client import list_dags, list_dag_runs, get_task_logs
 from .services.sla_monitor import compute_sla
+from .services.lineage import get_task_lineage, get_dag_lineage
 import httpx
 import asyncio
 
@@ -104,5 +105,29 @@ async def get_all_sla(
 
         return {"interval": interval, "results": output}
 
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    
+@app.get("/lineage/{dag_id}")
+async def lineage_for_dag(
+    dag_id: str = Path(..., description="The DAG ID to inspect")
+):
+    """
+    Task‑level lineage for a single DAG.
+    """
+    try:
+        return await get_task_lineage(dag_id)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="DAG not found")
+        raise HTTPException(status_code=502, detail=str(e))
+
+@app.get("/lineage")
+async def lineage_all_dags():
+    """
+    DAG‑level lineage (nodes only, edges stub).
+    """
+    try:
+        return await get_dag_lineage()
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
