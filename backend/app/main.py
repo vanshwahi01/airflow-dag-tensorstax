@@ -1,8 +1,9 @@
-from fastapi import FastAPI, HTTPException, Path, Query
+from fastapi import FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import PlainTextResponse
 from .services.airflow_client import list_dags, list_dag_runs, get_task_logs
 from .services.sla_monitor import compute_sla
 from .services.lineage import get_task_lineage, get_dag_lineage
+from .services.alerting import handle_airflow_failure
 import httpx
 import asyncio
 
@@ -113,7 +114,7 @@ async def lineage_for_dag(
     dag_id: str = Path(..., description="The DAG ID to inspect")
 ):
     """
-    Task‑level lineage for a single DAG.
+    Task level lineage for a single DAG.
     """
     try:
         return await get_task_lineage(dag_id)
@@ -125,9 +126,22 @@ async def lineage_for_dag(
 @app.get("/lineage")
 async def lineage_all_dags():
     """
-    DAG‑level lineage (nodes only, edges stub).
+    DAG level lineage
     """
     try:
         return await get_dag_lineage()
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+    
+    
+@app.post("/alerts/webhook")
+async def airflow_webhook(request: Request):
+    """
+    Endpoint for Airflow to POST on DAG failure
+    """
+    payload = await request.json()
+    try:
+        await handle_airflow_failure(payload)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
