@@ -3,12 +3,7 @@ from typing import List, Dict
 
 async def get_task_lineage(dag_id: str) -> Dict:
     """
-    Returns task‑level lineage for a single DAG.
-    {
-      "dag_id": str,
-      "nodes": [ { "id": task_id } ... ],
-      "edges": [ { "from": src, "to": dst } ... ]
-    }
+    Returns task-level lineage for a given DAG
     """
     tasks = await list_tasks(dag_id)
     nodes = [{"id": t["task_id"]} for t in tasks]
@@ -22,7 +17,6 @@ async def get_task_lineage(dag_id: str) -> Dict:
 async def get_dag_lineage() -> Dict:
     """
     Returns DAG level lineage: nodes are DAGs, edges are empty
-    (stub for future cross-DAG flows).
     """
     dags = await list_dags()
     dag_ids = [d["dag_id"] for d in dags["dags"]]
