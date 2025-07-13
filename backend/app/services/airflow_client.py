@@ -28,4 +28,26 @@ async def list_dag_runs(dag_id: str, limit: int = 10):
         resp = await client.get(url)
         resp.raise_for_status()
         return resp.json()
+    
+async def get_task_logs(
+    dag_id: str,
+    dag_run_id: str,
+    task_id: str,
+    try_number: int = 1
+) -> str:
+    """
+    Fetch the logs for a specific task instance.
+    Returns the raw log text.
+    """
+    url = (
+        f"{AIRFLOW_BASE}/dags/{dag_id}"
+        f"/dagRuns/{dag_run_id}"
+        f"/taskInstances/{task_id}"
+        f"/logs/{try_number}"
+    )
+    async with httpx.AsyncClient(auth=(AIRFLOW_USER, AIRFLOW_PASS)) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        return resp.text
+
 
