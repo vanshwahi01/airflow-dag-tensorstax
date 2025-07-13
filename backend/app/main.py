@@ -3,6 +3,7 @@ from fastapi.responses import PlainTextResponse
 from .services.airflow_client import list_dags, list_dag_runs, get_task_logs
 from .services.sla_monitor import compute_sla
 import httpx
+import asyncio
 
 app = FastAPI()
 
@@ -70,5 +71,38 @@ async def get_sla(
         raise HTTPException(status_code=404, detail="DAG not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    
+    
+@app.get("/sla")
+async def get_all_sla(
+    interval: str = Query("daily", regex="^(daily|weekly|monthly)$")
+):
+    """
+    Returns SLA compliance for all DAGs over the specified interval.
+    """
+    try:
+        # 1. Fetch all DAG IDs
+        dags_resp = await list_dags()
+        dag_ids = [d["dag_id"] for d in dags_resp["dags"]]
+
+        # 2. Launch parallel SLA computations
+        tasks = [compute_sla(dag_id, interval) for dag_id in dag_ids]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 3. Handle any failures per-DAG
+        output = []
+        for dag_id, res in zip(dag_ids, results):
+            if isinstance(res, Exception):
+                output.append({
+                    "dag_id": dag_id,
+                    "error": str(res)
+                })
+            else:
+                output.append(res)
+
+        return {"interval": interval, "results": output}
+
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
