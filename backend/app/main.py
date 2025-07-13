@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException, Path
+from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.responses import PlainTextResponse
 from .services.airflow_client import list_dags, list_dag_runs, get_task_logs
+from .services.sla_monitor import compute_sla
 import httpx
 
 app = FastAPI()
@@ -52,3 +53,22 @@ async def fetch_task_logs(
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+    
+@app.get("/sla/{dag_id}")
+async def get_sla(
+    dag_id: str = Path(..., description="DAG ID"),
+    interval: str = Query("daily", regex="^(daily|weekly|monthly)$")
+):
+    """
+    Returns SLA compliance for the given DAG over the specified interval.
+    """
+    try:
+        data = await compute_sla(dag_id, interval)
+        return data
+    except StopIteration:
+        raise HTTPException(status_code=404, detail="DAG not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
