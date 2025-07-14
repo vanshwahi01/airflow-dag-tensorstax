@@ -86,42 +86,84 @@ async def handle_auto_fix(dag_id, run_id, task_id, error):
     """
     # Load the DAG source file
     dag_path = os.path.join(os.getenv("AIRFLOW_HOME"), "dags", f"{dag_id}.py")
+    print("File to patch:", dag_path)
     with open(dag_path) as f:
         original_code = f.read()
 
     prompt = (
-        f"The following Airflow DAG file failed on task {task_id} with error:\n"
-        f"```\n{error}\n```\n"
-        "Here is the file contents:\n"
-        f"```\n{original_code}\n```\n"
-        "Output a unified diff that fixes the root cause."
+        f"The following Airflow DAG file (at `{dag_path}`) failed on task `{task_id}`\n"
+        f"with error:\n```\n{error}\n```\n\n"
+        f"Here is the file contents:\n```\n{original_code}\n```\n\n"
+        "Return the complete, corrected Python file contents, "
+        "without markdown fences or any commentary."
     )
     resp = llm.chat.completions.create(
         model="gpt-4o-mini",
         store=True,
-        messages=[{"role":"user","content":prompt}]
+        messages=[{"role": "user", "content": prompt}]
     )
-    diff = resp.choices[0].message.content
+    new_source = resp.choices[0].message.content
 
-    # 2) Extract the diff and strip any Markdown fences
-    raw = resp.choices[0].message.content
-    
-    # Remove triple-backtick fences if present
-    lines = raw.splitlines()
-    clean_lines = [l for l in lines if not l.strip().startswith("```")]
-    diff = "\n".join(clean_lines)
+    # Overwrite the DAG file
+    with open(dag_path, "w") as f:
+        f.write(new_source)
 
-    patch_file = tempfile.NamedTemporaryFile(mode="w+", delete=False)
-    patch_file.write(diff)
-    patch_file.flush()
-    subprocess.run(["patch", "-p0", "-i", patch_file.name], check=True)
-
-    # Triggering new DAG run
-    trigger_url = f"{AIRFLOW_BASE}/dags/{dag_id}/dagRuns"
+    # Trigger a new DAG run
     trigger_resp = httpx.post(
-        trigger_url,
+        f"{AIRFLOW_BASE}/dags/{dag_id}/dagRuns",
         auth=(AIRFLOW_USER, AIRFLOW_PASS),
         json={"conf": {}}
     )
     trigger_resp.raise_for_status()
+    new_run_id = trigger_resp.json()["dag_run_id"]
 
+    # Notify Slack that the fix was applied
+    slack = WebhookClient(os.getenv("SLACK_WEBHOOK_URL"))
+    slack.send(text=f":white_check_mark: Auto-Fix applied, triggered new run `{new_run_id}` for DAG `{dag_id}`.")
+
+    # Testing Purposes : IGNORE
+    
+    # raw = resp.choices[0].message.content
+    # lines = raw.splitlines()
+    # clean_lines = [l for l in lines if not l.strip().startswith("```")]
+    # diff_body = "\n".join(clean_lines)
+    
+    # # prepend a proper unified-diff header
+    # filename = os.path.basename(dag_path)
+    # header = f"--- {filename}\n+++ {filename}\n"
+    # full_diff = header + diff_body
+    
+    # with tempfile.NamedTemporaryFile(mode="w+", delete=False) as patch_file:
+    #     patch_file.write(full_diff)
+    #     patch_file.flush()
+        
+    # try:
+    #     subprocess.run([
+    #         "patch", "-p0", "--batch", "--silent",
+    #         "-d", os.path.dirname(dag_path),
+    #         "-i", patch_file.name
+    #     ], check=True)
+    # except subprocess.CalledProcessError:
+    #     rej_path = dag_path + ".rej"
+    #     reject_content = ""
+    #     if os.path.exists(rej_path):
+    #         with open(rej_path) as rej:
+    #             reject_content = rej.read()
+    #     # Notify Slack of the failure
+    #     slack = WebhookClient(os.getenv("SLACK_WEBHOOK_URL"))
+    #     text = (
+    #         f":x: *Auto‑Fix Failed* for `{dag_id}`\n"
+    #         f"> *Task*: `{task_id}`\n"
+    #         f"> *Error*: ```{error}```\n"
+    #         f"_Patch rejects attached below:_"
+    #     )
+    #     slack.send(
+    #         text=text,
+    #         attachments=[{"text": f"```{reject_content}```"}]
+    #     )
+    #     return 
+
+    # # patch_file = tempfile.NamedTemporaryFile(mode="w+", delete=False)
+    # # patch_file.write(diff)
+    # # patch_file.flush()
+    # # subprocess.run(["patch", "-p0", "-i", patch_file.name], check=True)
