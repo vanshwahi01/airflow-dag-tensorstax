@@ -103,9 +103,16 @@ async def handle_auto_fix(dag_id, run_id, task_id, error):
     )
     diff = resp.choices[0].message.content
 
-    # Apply the patch and diff
-    patch_file = tempfile.NamedTemporaryFile(delete=False)
-    patch_file.write(diff.encode())
+    # 2) Extract the diff and strip any Markdown fences
+    raw = resp.choices[0].message.content
+    
+    # Remove triple-backtick fences if present
+    lines = raw.splitlines()
+    clean_lines = [l for l in lines if not l.strip().startswith("```")]
+    diff = "\n".join(clean_lines)
+
+    patch_file = tempfile.NamedTemporaryFile(mode="w+", delete=False)
+    patch_file.write(diff)
     patch_file.flush()
     subprocess.run(["patch", "-p0", "-i", patch_file.name], check=True)
 
