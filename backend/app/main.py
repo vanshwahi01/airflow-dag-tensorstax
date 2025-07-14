@@ -8,6 +8,7 @@ from .services.alerting import handle_airflow_failure, handle_auto_fix
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from pydantic import BaseModel
+from airflow.models import DagBag
 import httpx
 import asyncio
 import os
@@ -220,12 +221,8 @@ async def list_tasks(dag_id: str):
     """
     Return all task_ids defined in the DAG.
     """
-    from airflow.models import DagBag
-    import os
-
     dagbag = DagBag(os.getenv("AIRFLOW_HOME"))
     dag = dagbag.get_dag(dag_id)
     if not dag:
         raise HTTPException(status_code=404, detail="DAG not found")
-    task_ids = [t.task_id for t in dag.tasks]
-    return {"tasks": [{"task_id": tid} for tid in task_ids]}
+    return {"tasks": [{"task_id": t.task_id} for t in dag.tasks]}
