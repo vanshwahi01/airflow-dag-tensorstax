@@ -4,3 +4,5 @@ httpx
 python-dotenv
 croniter
 slack-sdk
+python-multipart
+openai
