@@ -5,12 +5,18 @@ from .services.airflow_client import list_dags, list_dag_runs, get_task_logs
 from .services.sla_monitor import compute_sla
 from .services.lineage import get_task_lineage, get_dag_lineage
 from .services.alerting import handle_airflow_failure, handle_auto_fix
+from dotenv import load_dotenv
 import httpx
 import asyncio
 import os
 import json
+import certifi
 
 app = FastAPI()
+
+load_dotenv() # for env variables
+
+os.environ["SSL_CERT_FILE"] = certifi.where() # ensures every library uses the same CA bundle
 
 @app.get("/dags")
 async def get_dags():
