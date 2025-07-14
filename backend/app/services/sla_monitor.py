@@ -13,7 +13,7 @@ INTERVALS = {
 
 async def compute_sla(dag_id: str, interval: str = "daily"):
     """
-    Returns SLA stats for the given DAG over the past `interval`.
+    Returns SLA stats for the given DAG over the past interval
     """
     if interval not in INTERVALS:
         raise ValueError(f"Unknown interval {interval}")
@@ -22,12 +22,12 @@ async def compute_sla(dag_id: str, interval: str = "daily"):
     window = INTERVALS[interval]
     start = now - window
 
-    # 1. Fetch DAG metadata to know its schedule
+    # Fetch DAG metadata to know its schedule
     dags_resp = await list_dags()
     dag = next(d for d in dags_resp["dags"] if d["dag_id"] == dag_id)
     sched = dag["schedule_interval"]
 
-    # 2. Compute expected runs
+    # Compute expected runs
     if sched is None:
         expected = 0
     elif sched.get("__type") == "TimeDelta":
@@ -51,11 +51,11 @@ async def compute_sla(dag_id: str, interval: str = "daily"):
     else:
         expected = 0
 
-    # 3. Fetch all runs in that window 
+    # Fetch all runs in that window 
     runs_resp = await list_dag_runs(dag_id, limit=1000)
     runs = runs_resp["dag_runs"]
 
-    # 4. Count successes within window
+    # Count successes within window
     successes = sum(
         1
         for r in runs
@@ -63,7 +63,7 @@ async def compute_sla(dag_id: str, interval: str = "daily"):
         and start <= datetime.datetime.fromisoformat(r["execution_date"]) <= now
     )
 
-    # 5. Misses = expected - successes (positive only)
+    # Misses = expected - successes (positive only)
     misses = max(0, expected - successes)
 
     pct = (successes / expected * 100.0) if expected > 0 else 0.0
