@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Path, Query, Request, Form
+from fastapi import FastAPI, HTTPException, Path, Query, Request, Form, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from slack_sdk.signature import SignatureVerifier
 from .services.airflow_client import list_dags, list_dag_runs, get_task_logs
@@ -165,23 +165,20 @@ verifier = SignatureVerifier(signing_secret=SLACK_SIGNING_SECRET)
 
 @app.post("/slack/actions")
 async def slack_actions(
-    request: Request,
+    background_tasks: BackgroundTasks,
     payload: str = Form(...)
 ):
-    timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
-    sig = request.headers.get("X-Slack-Signature", "")
-    body = await request.body()
-    if not verifier.is_valid(body=body, timestamp=timestamp, signature=sig):
-        raise HTTPException(status_code=400, detail="Invalid Slack signature")
+    try:
+        print("🔔 Received payload:", payload)
+        data = json.loads(payload)
+        action = data.get("actions", [])[0]
+        if action["action_id"] != "auto_fix":
+            return {"status": "ignored"}
 
-    # 2) Parse the JSON-formatted payload
-    data = json.loads(payload)
-    if data.get("actions")[0]["action_id"] != "auto_fix":
-        return {"status": "ignored"}
+        dag_id, run_id, task_id, error = action["value"].split("|", 3)
+        background_tasks.add_task(handle_auto_fix, dag_id, run_id, task_id, error) # need this due to slack 3s rule for operational call
+        return {"text": ":gear: Auto-fix in progress!"}
 
-    # Extract context from the button’s value
-    dag_id, run_id, task_id, error = data["actions"][0]["value"].split("|", 3)
-
-    await handle_auto_fix(dag_id, run_id, task_id, error)
-
-    return {"text": "Auto-fix in progress!"}
+    except Exception as e:
+        print("Error in /slack/actions handler:\n")
+        raise HTTPException(status_code=500, detail=str(e))
