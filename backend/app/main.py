@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException, Path, Query, Request, Form, BackgroundTasks
 from fastapi.responses import PlainTextResponse
-from slack_sdk.signature import SignatureVerifier
 from .services.airflow_client import list_dags, list_dag_runs, get_task_logs, list_tasks
 from .services.sla_monitor import compute_sla
 from .services.lineage import get_task_lineage, get_dag_lineage
@@ -42,7 +41,7 @@ async def get_dag_runs(
     limit: int = 10
 ):
     """
-    Returns up to limit recent DagRun records for the given DAG.
+    Returns up to limit recent DagRun records for the given DAG
     """
     try:
         return await list_dag_runs(dag_id, limit)
@@ -66,7 +65,7 @@ async def fetch_task_logs(
     try_number: int = Path(..., ge=1)
 ):
     """
-    Proxy endpoint to get the logs of a specific task instance.
+    Proxy endpoint to get the logs of a specific task instance
     """
     try:
         logs = await get_task_logs(dag_id, run_id, task_id, try_number)
@@ -85,7 +84,7 @@ async def get_sla(
     interval: str = Query("daily", regex="^(daily|weekly|monthly)$")
 ):
     """
-    Returns SLA compliance for the given DAG over the specified interval.
+    Returns SLA compliance for the given DAG over the specified interval
     """
     try:
         data = await compute_sla(dag_id, interval)
@@ -118,7 +117,7 @@ async def get_all_sla(
     interval: str = Query("daily", regex="^(daily|weekly|monthly)$")
 ):
     """
-    Returns SLA compliance for all DAGs over the specified interval.
+    Returns SLA compliance for all DAGs over the specified interval
     """
     try:
         # Fetch all DAG IDs
@@ -150,7 +149,7 @@ async def lineage_for_dag(
     dag_id: str = Path(..., description="The DAG ID to inspect")
 ):
     """
-    Task level lineage for a single DAG.
+    Task level lineage for a single DAG
     """
     try:
         return await get_task_lineage(dag_id)
@@ -183,10 +182,6 @@ async def airflow_webhook(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-    
-# Initialize Slack signature 
-SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET")
-verifier = SignatureVerifier(signing_secret=SLACK_SIGNING_SECRET)
 
 @app.post("/slack/actions")
 async def slack_actions(
@@ -211,7 +206,7 @@ async def slack_actions(
 @app.get("/dags/{dag_id}/tasks")
 async def get_tasks(dag_id: str):
     """
-    Proxy to Airflow REST API: list all tasks in a DAG.
+    Proxy to Airflow REST API: list all tasks in a DAG
     """
     try:
         tasks = await list_tasks(dag_id)
