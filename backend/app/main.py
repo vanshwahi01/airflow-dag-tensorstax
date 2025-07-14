@@ -5,6 +5,7 @@ from .services.airflow_client import list_dags, list_dag_runs, get_task_logs
 from .services.sla_monitor import compute_sla
 from .services.lineage import get_task_lineage, get_dag_lineage
 from .services.alerting import handle_airflow_failure, handle_auto_fix
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import httpx
 import asyncio
@@ -17,6 +18,15 @@ app = FastAPI()
 load_dotenv() # for env variables
 
 os.environ["SSL_CERT_FILE"] = certifi.where() # ensures every library uses the same CA bundle
+
+# CORS middleware to allow requests from the frontend to localhost:3000
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/dags")
 async def get_dags():
