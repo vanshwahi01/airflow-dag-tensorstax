@@ -169,7 +169,7 @@ async def slack_actions(
     payload: str = Form(...)
 ):
     try:
-        print("🔔 Received payload:", payload)
+        print("Received payload:", payload)
         data = json.loads(payload)
         action = data.get("actions", [])[0]
         if action["action_id"] != "auto_fix":
