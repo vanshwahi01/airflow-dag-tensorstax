@@ -1,6 +1,7 @@
 import os
 import httpx
 import subprocess, tempfile
+import time
 from openai import OpenAI
 from slack_sdk.webhook import WebhookClient
 from dotenv import load_dotenv
@@ -94,8 +95,7 @@ async def handle_auto_fix(dag_id, run_id, task_id, error):
         f"The following Airflow DAG file (at `{dag_path}`) failed on task `{task_id}`\n"
         f"with error:\n```\n{error}\n```\n\n"
         f"Here is the file contents:\n```\n{original_code}\n```\n\n"
-        "Return the complete, corrected Python file contents, "
-        "without markdown fences or any commentary."
+        "Return the complete, corrected Python file contents, without markdown fences or any commentary."
     )
     resp = llm.chat.completions.create(
         model="gpt-4o-mini",
@@ -116,10 +116,34 @@ async def handle_auto_fix(dag_id, run_id, task_id, error):
     )
     trigger_resp.raise_for_status()
     new_run_id = trigger_resp.json()["dag_run_id"]
+    
+    # Retry logic
+    status = None
+    attempt = 1
+    max_attempts = 3
+    for _ in range(5): # 5 attempts with 10s sleep, we poll the status for completion
+        time.sleep(10)
+        jr = httpx.get(
+            f"{AIRFLOW_BASE}/dags/{dag_id}/dagRuns/{new_run_id}",
+            auth=(AIRFLOW_USER, AIRFLOW_PASS)
+        ).json()
+        status = jr["state"].lower()
+        if status in ("success", "failed"):
+            break
 
-    # Notify Slack that the fix was applied
     slack = WebhookClient(os.getenv("SLACK_WEBHOOK_URL"))
-    slack.send(text=f":white_check_mark: Auto-Fix applied, triggered new run `{new_run_id}` for DAG `{dag_id}`.")
+    if status == "success":
+        slack.send(text=f"Auto-fix succeeded on attempt {attempt} for `{dag_id}` run `{new_run_id}`.")
+        return
+
+    if status == "failed" and attempt < max_attempts:
+        # Extract the new error from the run’s logs or resp
+        new_error = jr.get("state") + ": " + jr.get("error", "<no error text>")
+        slack.send(text=f"Auto-fix attempt {attempt} for `{dag_id}` run `{new_run_id}` failed. Retrying…")
+        attempt += 1
+        await handle_auto_fix(dag_id, new_run_id, task_id, new_error)
+    else:
+        slack.send(text=f"Auto-fix failed after {attempt} attempts for `{dag_id}`. Manual intervention needed.")
 
     # Testing Purposes : IGNORE
     
