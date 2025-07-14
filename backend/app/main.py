@@ -1,11 +1,14 @@
-from fastapi import FastAPI, HTTPException, Path, Query, Request
+from fastapi import FastAPI, HTTPException, Path, Query, Request, Form
 from fastapi.responses import PlainTextResponse
+from slack_sdk.signature import SignatureVerifier
 from .services.airflow_client import list_dags, list_dag_runs, get_task_logs
 from .services.sla_monitor import compute_sla
 from .services.lineage import get_task_lineage, get_dag_lineage
-from .services.alerting import handle_airflow_failure
+from .services.alerting import handle_airflow_failure, handle_auto_fix
 import httpx
 import asyncio
+import os
+import json
 
 app = FastAPI()
 
@@ -16,13 +19,14 @@ async def get_dags():
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
+
 @app.get("/dags/{dag_id}/runs")
 async def get_dag_runs(
     dag_id: str = Path(..., description="The ID of the DAG"),
     limit: int = 10
 ):
     """
-    Returns up to `limit` recent DagRun records for the given DAG.
+    Returns up to limit recent DagRun records for the given DAG.
     """
     try:
         return await list_dag_runs(dag_id, limit)
@@ -32,6 +36,7 @@ async def get_dag_runs(
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
     
 @app.get(
     "/dags/{dag_id}/runs/{run_id}/tasks/{task_id}/logs/{try_number}",
@@ -85,15 +90,14 @@ async def get_all_sla(
     Returns SLA compliance for all DAGs over the specified interval.
     """
     try:
-        # 1. Fetch all DAG IDs
+        # Fetch all DAG IDs
         dags_resp = await list_dags()
         dag_ids = [d["dag_id"] for d in dags_resp["dags"]]
 
-        # 2. Launch parallel SLA computations
         tasks = [compute_sla(dag_id, interval) for dag_id in dag_ids]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # 3. Handle any failures per-DAG
+        # Handle any failures per-DAG
         output = []
         for dag_id, res in zip(dag_ids, results):
             if isinstance(res, Exception):
@@ -109,6 +113,7 @@ async def get_all_sla(
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
     
+    
 @app.get("/lineage/{dag_id}")
 async def lineage_for_dag(
     dag_id: str = Path(..., description="The DAG ID to inspect")
@@ -122,6 +127,7 @@ async def lineage_for_dag(
         if e.response.status_code == 404:
             raise HTTPException(status_code=404, detail="DAG not found")
         raise HTTPException(status_code=502, detail=str(e))
+
 
 @app.get("/lineage")
 async def lineage_all_dags():
@@ -145,3 +151,31 @@ async def airflow_webhook(request: Request):
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+    
+# Initialize Slack signature 
+SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET")
+verifier = SignatureVerifier(signing_secret=SLACK_SIGNING_SECRET)
+
+@app.post("/slack/actions")
+async def slack_actions(
+    request: Request,
+    payload: str = Form(...)
+):
+    timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
+    sig = request.headers.get("X-Slack-Signature", "")
+    body = await request.body()
+    if not verifier.is_valid(body=body, timestamp=timestamp, signature=sig):
+        raise HTTPException(status_code=400, detail="Invalid Slack signature")
+
+    # 2) Parse the JSON-formatted payload
+    data = json.loads(payload)
+    if data.get("actions")[0]["action_id"] != "auto_fix":
+        return {"status": "ignored"}
+
+    # Extract context from the button’s value
+    dag_id, run_id, task_id, error = data["actions"][0]["value"].split("|", 3)
+
+    await handle_auto_fix(dag_id, run_id, task_id, error)
+
+    return {"text": "Auto-fix in progress!"}
