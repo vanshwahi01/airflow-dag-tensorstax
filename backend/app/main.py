@@ -1,14 +1,12 @@
 from fastapi import FastAPI, HTTPException, Path, Query, Request, Form, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from slack_sdk.signature import SignatureVerifier
-from .services.airflow_client import list_dags, list_dag_runs, get_task_logs
+from .services.airflow_client import list_dags, list_dag_runs, get_task_logs, list_tasks
 from .services.sla_monitor import compute_sla
 from .services.lineage import get_task_lineage, get_dag_lineage
 from .services.alerting import handle_airflow_failure, handle_auto_fix
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from pydantic import BaseModel
-from airflow.models import DagBag
 import httpx
 import asyncio
 import os
@@ -210,19 +208,17 @@ async def slack_actions(
         print("Error in /slack/actions handler:\n")
         raise HTTPException(status_code=500, detail=str(e))
     
-class TaskItem(BaseModel):
-    task_id: str
-
-class TasksResponse(BaseModel):
-    tasks: list[TaskItem]
-
-@app.get("/dags/{dag_id}/tasks", response_model=TasksResponse)
-async def list_tasks(dag_id: str):
+@app.get("/dags/{dag_id}/tasks")
+async def get_tasks(dag_id: str):
     """
-    Return all task_ids defined in the DAG.
+    Proxy to Airflow REST API: list all tasks in a DAG.
     """
-    dagbag = DagBag(os.getenv("AIRFLOW_HOME"))
-    dag = dagbag.get_dag(dag_id)
-    if not dag:
-        raise HTTPException(status_code=404, detail="DAG not found")
-    return {"tasks": [{"task_id": t.task_id} for t in dag.tasks]}
+    try:
+        tasks = await list_tasks(dag_id)
+        return {"tasks": tasks}
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="DAG not found")
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
