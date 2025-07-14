@@ -7,22 +7,23 @@ from .services.lineage import get_task_lineage, get_dag_lineage
 from .services.alerting import handle_airflow_failure, handle_auto_fix
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from pydantic import BaseModel
 import httpx
 import asyncio
 import os
 import json
 import certifi
 
-app = FastAPI()
+app = FastAPI(title="Airflow Observability")
 
 load_dotenv() # for env variables
 
 os.environ["SSL_CERT_FILE"] = certifi.where() # ensures every library uses the same CA bundle
 
-# CORS middleware to allow requests from the frontend to localhost:3000
+# CORS policy to allow requests from the frontend to localhost:3000
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -91,9 +92,24 @@ async def get_sla(
         data = await compute_sla(dag_id, interval)
         return data
     except StopIteration:
-        raise HTTPException(status_code=404, detail="DAG not found")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # DAG not found so empty SLA
+        return {
+            "dag_id": dag_id,
+            "interval": interval,
+            "expected": 0,
+            "successes": 0,
+            "misses": 0,
+            "compliance_pct": 0.0
+        }
+    except ValueError:
+        return {
+            "dag_id": dag_id,
+            "interval": interval,
+            "expected": 0,
+            "successes": 0,
+            "misses": 0,
+            "compliance_pct": 0.0
+        }
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
     
@@ -192,3 +208,24 @@ async def slack_actions(
     except Exception as e:
         print("Error in /slack/actions handler:\n")
         raise HTTPException(status_code=500, detail=str(e))
+    
+class TaskItem(BaseModel):
+    task_id: str
+
+class TasksResponse(BaseModel):
+    tasks: list[TaskItem]
+
+@app.get("/dags/{dag_id}/tasks", response_model=TasksResponse)
+async def list_tasks(dag_id: str):
+    """
+    Return all task_ids defined in the DAG.
+    """
+    from airflow.models import DagBag
+    import os
+
+    dagbag = DagBag(os.getenv("AIRFLOW_HOME"))
+    dag = dagbag.get_dag(dag_id)
+    if not dag:
+        raise HTTPException(status_code=404, detail="DAG not found")
+    task_ids = [t.task_id for t in dag.tasks]
+    return {"tasks": [{"task_id": tid} for tid in task_ids]}
