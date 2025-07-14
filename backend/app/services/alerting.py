@@ -72,8 +72,9 @@ async def handle_airflow_failure(payload: dict):
         ]
     }
     slack_resp = slack.send(**slack_payload)
-    if not slack_resp.ok:
-        raise RuntimeError(f"Slack connection failed: {slack_resp.status_code} {slack_resp.body}")
+    if slack_resp.status_code != 200:
+        body = getattr(slack_resp, "body", slack_resp.text)
+        raise RuntimeError(f"Slack failed: {slack_resp.status_code} {body}")
     
 
 async def handle_auto_fix(dag_id, run_id, task_id, error):
